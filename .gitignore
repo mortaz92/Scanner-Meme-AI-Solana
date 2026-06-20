@@ -1,0 +1,17 @@
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Eventuali file locali di configurazione con segreti
+.env
+.env.local
+*.local
+
+# Non committare mai chiavi API o credenziali
+**/secrets.json
+**/*apikey*
+**/*api_key*
