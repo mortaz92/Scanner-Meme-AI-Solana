@@ -1,3 +1,65 @@
+// Service worker minimale: mette in cache la shell dell'app per un
+// caricamento istantaneo. Le chiamate all'API RugCheck NON vengono mai
+// messe in cache, perché i dati di rischio devono sempre essere aggiornati.
+const CACHE_NAME = "scanner-meme-shell-v1";
+const SHELL_FILES = [
+  "./",
+  "./index.html",
+  "./manifest.json",
+];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+
+  // Never cache API / proxy calls — always go to the network for live data.
+  if (
+    url.hostname.includes("rugcheck.xyz") ||
+    url.hostname.includes("corsproxy.io") ||
+    url.hostname.includes("allorigins.win")
+  ) {
+    return; // let the browser handle it normally
+  }
+
+  // App shell: cache-first for speed, falling back to network.
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
+});
+
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Eventuali file locali di configurazione con segreti
+.env
+.env.local
+*.local
+
+# Non committare mai chiavi API o credenziali
+**/secrets.json
+**/*apikey*
+**/*api_key*
+
 <!doctype html>
 <html lang="it">
 <head>
@@ -122,6 +184,20 @@ svg { display: block; }
 }
 .search-btn:active { transform: scale(0.97); }
 .search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 6px 8px;
+  flex-shrink: 0;
+  display: none;
+  border-radius: 6px;
+  line-height: 1;
+}
+.clear-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.clear-btn.show { display: block; }
 .spin { animation: spin 0.9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -376,6 +452,18 @@ svg { display: block; }
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border);
 }
+
+.rug-warning {
+  background: rgba(229,72,77,0.10);
+  border: 1px solid rgba(229,72,77,0.35);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #F2A8AB;
+  margin-bottom: 16px;
+}
+.rug-warning strong { color: #F7C5C7; }
 .holders-summary-item { flex: 1; }
 .holders-summary-num { font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; }
 .holders-summary-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
@@ -417,6 +505,38 @@ svg { display: block; }
   gap: 10px;
 }
 .holders-toggle-sub { font-size: 11.5px; color: var(--text-dim); font-weight: 400; margin-top: 2px; }
+
+/* Chart panel */
+.chart-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 16px 8px;
+  overflow: hidden;
+}
+.chart-frame-wrap {
+  position: relative;
+  width: 100%;
+  height: 420px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0B0D10;
+}
+.chart-frame-wrap iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+.chart-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 420px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+  padding: 0 20px;
+}
 
 /* AI verdict panel */
 .ai-card {
@@ -516,6 +636,7 @@ svg { display: block; }
   <div class="search-bar">
     <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
     <input id="addrInput" class="search-input" placeholder="Incolla il mint address del token (es. 9n4n...pump)" spellcheck="false" autocapitalize="off" autocomplete="off" />
+    <button id="clearBtn" class="clear-btn" title="Cancella" aria-label="Cancella">✕</button>
     <button id="checkBtn" class="search-btn">Analizza</button>
   </div>
 
@@ -534,8 +655,8 @@ const RUGCHECK_BASE = "https://api.rugcheck.xyz/v1/tokens";
 // Public Solana RPC for on-chain transaction history checks. Free, no key needed,
 // but rate-limited — that's why we cap the wallet scan to the top 10 holders.
 const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
-const HOLDER_LIMIT_PCT = 3; // soglia richiesta: nessun top holder oltre il 3%
-const HOLDERS_TO_SCAN = 10; // top N holder analizzati per lo storico vendite
+const HOLDER_LIMIT_PCT = 20; // soglia richiesta: nessun top holder oltre il 20% (segnale di rug pull)
+const HOLDERS_TO_SCAN = 20; // top N holder analizzati per lo storico vendite
 const SELL_WINDOW_DAYS = 30; // finestra "puliti da almeno 1 mese"
 const CORS_PROXIES = [
   (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
@@ -637,6 +758,16 @@ function normaliseReport(data, addr) {
       insider: !!h.insider,
     }));
 
+  // Pair con più liquidità: lo useremo per incorporare il grafico DexScreener
+  const bestMarket = markets.length
+    ? markets.reduce((best, m) => {
+        const liq = m.liquidity?.usd || m.lp?.lpLockedUSD || 0;
+        const bestLiq = best ? (best.liquidity?.usd || best.lp?.lpLockedUSD || 0) : -1;
+        return liq > bestLiq ? m : best;
+      }, null)
+    : null;
+  const pairAddress = bestMarket?.pubkey || bestMarket?.market?.pubkey || bestMarket?.id || null;
+
   return {
     addr,
     name: data.tokenMeta?.name || data.token?.name || "Token sconosciuto",
@@ -646,7 +777,7 @@ function normaliseReport(data, addr) {
     freezeAuthority: data.freezeAuthority ?? data.token?.freezeAuthority ?? null,
     holdersCount: data.totalHolders ?? topHolders.length ?? null,
     topHolderPct, totalLiquidity, lpLockedPct,
-    holderList,
+    holderList, pairAddress,
   };
 }
 
@@ -775,8 +906,8 @@ DATI DEL TOKEN:
 RISCHI RILEVATI DALL'ANALISI AUTOMATICA:
 ${riskLines}
 
-${report.holderScan ? `ANALISI DEI TOP ${report.holderScan.length} HOLDER (soglia 3% a wallet, storico vendite 30 giorni):
-${report.holderScan.map((h,i) => `- Holder #${i+1}: detiene ${h.pct.toFixed(2)}% (${h.pct > 3 ? "OLTRE la soglia del 3%" : "entro la soglia"}) — stato: ${h.status === "sold" ? "ha movimentato il token di recente" : h.status === "clean" ? "nessun movimento sospetto" : "non verificabile"}`).join("\n")}` : "Analisi dettagliata dei top holder non ancora eseguita dall'utente."}
+${report.holderScan ? `ANALISI DEI TOP ${report.holderScan.length} HOLDER (soglia ${HOLDER_LIMIT_PCT}% a wallet, storico vendite ${SELL_WINDOW_DAYS} giorni):
+${report.holderScan.map((h,i) => `- Holder #${i+1}: detiene ${h.pct.toFixed(2)}% (${h.pct > HOLDER_LIMIT_PCT ? "OLTRE la soglia del " + HOLDER_LIMIT_PCT + "% — possibile pericolo rug pull" : "entro la soglia"}) — stato: ${h.status === "sold" ? "ha movimentato il token di recente" : h.status === "clean" ? "nessun movimento sospetto" : "non verificabile"}`).join("\n")}` : "Analisi dettagliata dei top holder non ancora eseguita dall'utente."}
 
 Scrivi un giudizio in 2-3 paragrafi brevi, in italiano semplice e diretto, senza usare elenchi puntati. Spiega cosa significano questi dati in pratica per chi vuole comprare il token, quali sono i 1-2 segnali più importanti da tenere a mente, e chiudi con un consiglio pratico equilibrato (non dare consigli finanziari assoluti tipo "compra" o "non comprare", ma aiuta la persona a capire il livello di cautela necessario).`;
 }
@@ -881,6 +1012,24 @@ async function loadAiVerdict(report) {
 
 
 
+function chartCardHtml(report) {
+  if (!report.pairAddress) {
+    return `
+      <div class="chart-card">
+        <h3 class="card-heading">Grafico prezzo</h3>
+        <div class="chart-unavailable">Nessun pool di liquidità trovato per questo token: grafico non disponibile.</div>
+      </div>`;
+  }
+  const src = `https://dexscreener.com/solana/${report.pairAddress}?embed=1&theme=dark&trades=0&info=0`;
+  return `
+    <div class="chart-card">
+      <h3 class="card-heading">Grafico prezzo</h3>
+      <div class="chart-frame-wrap">
+        <iframe src="${src}" loading="lazy" title="Grafico prezzo ${report.name}" allow="clipboard-write"></iframe>
+      </div>
+    </div>`;
+}
+
 function shortWallet(a) { return a ? a.slice(0,4) + "…" + a.slice(-4) : "—"; }
 
 function holdersToggleHtml(count) {
@@ -888,7 +1037,7 @@ function holdersToggleHtml(count) {
     <button class="holders-toggle" id="holdersToggleBtn">
       <span>
         🔍 Analizza top ${count} holder
-        <div class="holders-toggle-sub">Soglia ${HOLDER_LIMIT_PCT}% a wallet · storico vendite ${SELL_WINDOW_DAYS} giorni</div>
+        <div class="holders-toggle-sub">Allerta rug pull oltre il ${HOLDER_LIMIT_PCT}% a wallet · storico vendite ${SELL_WINDOW_DAYS} giorni</div>
       </span>
       <span>→</span>
     </button>`;
@@ -912,6 +1061,11 @@ function holdersResultHtml(results) {
   const sold = results.filter(h => h.status === "sold").length;
   const clean = results.filter(h => h.status === "clean").length;
 
+  const rugWarning = overLimit > 0 ? `
+    <div class="rug-warning">
+      ⚠️ <strong>Pericolo rug pull:</strong> ${overLimit} wallet ${overLimit === 1 ? "detiene" : "detengono"} da ${overLimit === 1 ? "solo" : ""} ${overLimit === 1 ? "una" : ""} oltre il ${HOLDER_LIMIT_PCT}% della supply. Un wallet così grande può far crollare il prezzo vendendo in un colpo solo.
+    </div>` : "";
+
   const rows = results.map((h, i) => {
     const pctClass = h.pct > HOLDER_LIMIT_PCT ? "over-limit" : "under-limit";
     const statusLabel = { clean: "✓ pulito", sold: "⚠ ha venduto", unknown: "? non verificato" }[h.status] || "—";
@@ -927,11 +1081,12 @@ function holdersResultHtml(results) {
   return `
     <div class="holders-card">
       <h3 class="card-heading">Analisi top ${results.length} holder</h3>
-      <p class="holders-subhead">Soglia richiesta: nessun wallet oltre il ${HOLDER_LIMIT_PCT}% della supply. Storico verificato sugli ultimi ${SELL_WINDOW_DAYS} giorni.</p>
+      <p class="holders-subhead">Un singolo wallet oltre il ${HOLDER_LIMIT_PCT}% della supply è un segnale di pericolo rug pull. Storico verificato sugli ultimi ${SELL_WINDOW_DAYS} giorni.</p>
+      ${rugWarning}
       <div class="holders-summary">
         <div class="holders-summary-item">
           <div class="holders-summary-num" style="color:${overLimit > 0 ? '#E5484D' : '#3ECF8E'}">${overLimit}</div>
-          <div class="holders-summary-label">Oltre il ${HOLDER_LIMIT_PCT}%</div>
+          <div class="holders-summary-label">Oltre il ${HOLDER_LIMIT_PCT}% (pericolo)</div>
         </div>
         <div class="holders-summary-item">
           <div class="holders-summary-num" style="color:${sold > 0 ? '#E5484D' : '#3ECF8E'}">${sold}</div>
@@ -989,6 +1144,8 @@ function renderReport(report) {
           <button class="copy-btn" id="copyBtn">${ICONS.copy}<span class="mono">${shortAddr(report.addr)}</span></button>
         </div>
       </section>
+
+      ${chartCardHtml(report)}
 
       <div id="aiPanel"></div>
 
@@ -1075,6 +1232,21 @@ async function runCheck(addrOverride) {
 document.getElementById("checkBtn").addEventListener("click", () => runCheck());
 document.getElementById("addrInput").addEventListener("keydown", (e) => { if (e.key === "Enter") runCheck(); });
 
+const addrInputEl = document.getElementById("addrInput");
+const clearBtnEl = document.getElementById("clearBtn");
+function syncClearBtn() {
+  clearBtnEl.classList.toggle("show", addrInputEl.value.trim().length > 0);
+}
+addrInputEl.addEventListener("input", syncClearBtn);
+syncClearBtn();
+
+clearBtnEl.addEventListener("click", () => {
+  addrInputEl.value = "";
+  syncClearBtn();
+  addrInputEl.focus();
+  document.getElementById("results").innerHTML = emptyState();
+});
+
 document.getElementById("manageKeyBtn").addEventListener("click", () => {
   if (getApiKey()) {
     const confirmClear = confirm("Vuoi rimuovere la chiave API salvata su questo dispositivo? Il giudizio AI smetterà di funzionare finché non ne inserisci una nuova.");
@@ -1111,3 +1283,215 @@ if ("serviceWorker" in navigator) {
 </script>
 </body>
 </html>
+
+# Scanner Meme Solana — Guida alla pubblicazione (PWA)
+
+Questo pacchetto contiene un'app web completa e pronta da pubblicare.
+Non serve "compilare" nulla: sono solo file HTML/CSS/JS che un hosting
+gratuito può servire così come sono.
+
+## Cosa contiene
+
+```
+index.html          → l'app vera e propria
+manifest.json        → dice al telefono come installarla (nome, icona, colori)
+service-worker.js    → permette il caricamento rapido / parzialmente offline
+icons/               → le icone dell'app (192px, 512px, versione "maskable")
+```
+
+## Passo 1 — Crea un account hosting gratuito
+
+Scegline uno (entrambi gratuiti, bastano pochi minuti):
+
+- **Netlify** → https://app.netlify.com/signup
+- **Vercel** → https://vercel.com/signup
+
+Ti consiglio **Netlify** perché ha la modalità "drag and drop" più semplice.
+
+## Passo 2 — Carica i file (metodo più semplice: drag & drop)
+
+1. Vai su https://app.netlify.com/drop
+2. Trascina l'intera cartella `pwa-app` (quella con dentro `index.html`,
+   `manifest.json`, ecc.) nella pagina
+3. In pochi secondi Netlify ti darà un indirizzo tipo:
+   `https://nome-a-caso-12345.netlify.app`
+4. Funziona già! Apri quel link dal telefono per provarlo
+
+### Se vuoi un nome più carino
+Dentro Netlify, in "Site settings" → "Change site name", puoi scegliere
+un nome tipo `scanner-meme-mortaz.netlify.app` (gratis, nessun dominio
+da comprare).
+
+## Passo 3 — Installa l'app sul telefono
+
+Apri il link che hai ottenuto dal browser del telefono:
+
+**Android (Chrome):**
+- Si apre un banner "Installa l'app sulla schermata Home" dentro l'app stessa
+- Oppure: tre puntini in alto a destra → "Installa app"
+
+**iPhone (Safari — obbligatorio usare Safari, non Chrome):**
+- Tocca l'icona di condivisione (il quadrato con la freccia in su)
+- Scorri e tocca "Aggiungi a Home"
+
+Da quel momento l'icona a scudo verde apparirà sulla tua schermata Home
+come una vera app, a schermo intero, senza barra del browser.
+
+## Note tecniche importanti
+
+- **Niente CORS**: una volta ospitata su un dominio vero (netlify.app o
+  simili), molte API funzionano meglio rispetto a quando l'app girava
+  dentro l'anteprima di Claude. Se dovessi comunque vedere errori di
+  rete, il codice include già un fallback automatico su due proxy CORS
+  pubblici.
+- **Aggiornamenti**: se in futuro vuoi modificare l'app (es. aggiungere
+  funzioni), basta ricaricare la cartella aggiornata su Netlify — non
+  serve ripubblicare da zero, puoi anche collegare Netlify a GitHub per
+  aggiornamenti automatici.
+- **Costi**: zero. Netlify e Vercel hanno piani gratuiti più che
+  sufficienti per un'app personale come questa.
+- **Privacy**: l'app non raccoglie dati tuoi. La cronologia degli
+  indirizzi controllati resta salvata solo sul tuo telefono
+  (`localStorage`), non su nessun server.
+
+## Analisi dei top holder (novità)
+
+Dopo aver controllato un token, compare un pulsante "Analizza top 20
+holder" che:
+
+1. Controlla che nessuno dei primi 20 possessori detenga più del **20%**
+   della supply. Se qualcuno lo supera, compare un avviso ben visibile
+   di **pericolo rug pull** — un wallet così grande può far crollare il
+   prezzo vendendo in un colpo solo
+2. Interroga la blockchain Solana per lo storico delle transazioni di
+   ogni wallet negli ultimi **30 giorni**, per capire se hanno già
+   venduto il token
+
+**Tempo di attesa:** questa scansione interroga la blockchain in tempo
+reale per ogni wallet (20 in totale), quindi richiede circa **40-60
+secondi**. È normale: c'è una barra di progresso che mostra
+l'avanzamento.
+
+**Limite onesto:** usa l'RPC pubblico gratuito di Solana, che ha dei
+limiti di velocità. Se in quel momento il servizio è molto trafficato,
+alcuni wallet potrebbero risultare "non verificato" invece di
+"pulito/ha venduto" — in quel caso riprova tra qualche minuto.
+
+## Grafico prezzo (novità)
+
+Ogni token analizzato mostra ora un grafico prezzo incorporato da
+DexScreener, con candele e volume in tempo reale. Se il token non ha
+ancora un pool di liquidità attivo, il grafico non sarà disponibile
+(capita per token appena creati).
+
+## Pulsante Cancella (novità)
+
+Accanto al pulsante "Analizza" compare una ✕ quando scrivi un indirizzo:
+permette di svuotare velocemente il campo e tornare alla schermata
+iniziale.
+
+## Giudizio AI (novità — richiede un piccolo passo extra)
+
+Dopo ogni controllo, l'app prova a generare un **giudizio finale scritto
+in italiano semplice**, come se un esperto ti spiegasse la situazione,
+basandosi su tutti i dati raccolti (rischi, liquidità, holder, e — se
+l'hai eseguita — l'analisi dei top 10 holder).
+
+Questa funzione usa l'API di Anthropic (Claude) e **richiede una chiave
+API personale**, perché un sito statico pubblico non può usare la mia
+chiave: dovrebbe condividerla con chiunque visiti il sito, il che non è
+sicuro.
+
+### Come attivarlo (5 minuti)
+
+1. Vai su **console.anthropic.com** e crea un account (se non l'hai già)
+2. Nella sezione "API Keys", crea una nuova chiave
+3. Apri il file `index.html` con un editor di testo (anche il Blocco
+   Note va bene) e cerca questa riga vicino all'inizio dello script:
+
+   ```js
+   const ANTHROPIC_API_KEY = "";
+   ```
+
+4. Incolla la tua chiave tra le virgolette:
+
+   ```js
+   const ANTHROPIC_API_KEY = "sk-ant-...";
+   ```
+
+5. Salva il file e ripubblica la cartella su Netlify (drag & drop di
+   nuovo, come la prima volta)
+
+**⚠️ Attenzione importante sulla sicurezza:** mettere una chiave API
+direttamente nel codice di un sito pubblico significa che **chiunque
+visiti il sito può vederla** (basta aprire gli strumenti sviluppatore
+del browser) e usarla a tue spese. Per un uso solo personale, dove sei
+l'unica persona a conoscere il link del sito, il rischio è basso ma non
+zero. Se in futuro vuoi condividere il link con altre persone, è meglio
+spostare questa chiamata su un piccolo server (fammelo sapere, è un
+passo successivo che posso aiutarti a fare).
+
+**Senza chiave**, l'app funziona comunque normalmente: il pannello
+mostrerà "Giudizio AI non disponibile" ma tutti i dati tecnici (rischio,
+liquidità, holder) restano pienamente funzionanti.
+
+## Vuoi pubblicarla anche su Play Store / App Store in futuro?
+
+Una volta che la PWA funziona, è possibile "incartarla" con uno
+strumento come **Capacitor** per pubblicarla anche sugli store veri.
+Richiede un account sviluppatore Google (~25$ una tantum) o Apple
+(~99$/anno). Fammelo sapere quando vuoi affrontare questo passo.
+
+MIT License
+
+Copyright (c) 2026 Mortaz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+{
+  "name": "Scanner Meme Solana",
+  "short_name": "Scanner Meme",
+  "description": "Controlla se un memecoin Solana è a rischio scam prima di comprarlo.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0B0D10",
+  "theme_color": "#0B0D10",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
