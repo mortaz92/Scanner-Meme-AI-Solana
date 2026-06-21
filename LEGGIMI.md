@@ -1,3 +1,1384 @@
+[README.md](https://github.com/user-attachments/files/29174128/README.md)
+# 🛡️ Scanner Meme Solana
+
+Controlla se un memecoin su **Solana** è a rischio scam prima di comprarlo.
+App web (PWA) gratuita, installabile su telefono, senza account né backend.
+
+> 🇮🇹 Guida completa in italiano: vedi [`LEGGIMI.md`](./LEGGIMI.md)
+
+## Cosa fa
+
+- ✅ Analizza liquidità, autorità del contratto (mint/freeze) e concentrazione![Uploading icon-192.png…]()
+[service-worker.js](https://github.com/user-attachments/files/29174129/service-worker.js)
+
+  dei possessori usando i dati pubblici di [RugCheck.xyz](https://rugcheck.xyz)
+- ✅ Verifica che nessuno dei top 10 holder superi una soglia configurabile
+  (default 3%) della supply
+- ✅ Controlla lo storico delle transazioni dei top holder sulla blockchain
+  Solana per individuare vendite recenti (finestra di 30 giorni)
+- ✅ Genera un giudizio finale in linguaggio naturale tramite l'API di
+  Claude (opzionale, richiede una chiave API personale)
+- ✅ Funziona come PWA: installabile sulla schermata Home di Android/iPhone
+
+## Perché esiste
+
+Nato per dare a chiunque uno strumento gratuito e trasparente per
+riconoscere i segnali tipici dei rug pull, senza fidarsi solo del
+marketing di un progetto.
+
+## Demo rapida / Pubblicazione
+
+Il modo più veloce per pubblicarlo è il drag & drop gratuito su Netlify:
+
+1. Clona o scarica questo repository
+2. Vai su [app.netlify.com/drop](https://app.netlify.com/drop)
+3. Trascina la cartella del progetto
+4. Apri il link generato dal telefono e installalo sulla schermata Home
+
+Istruzioni dettagliate passo passo (in italiano) in [`LEGGIMI.md`](./LEGGIMI.md).
+
+## Stack tecnico
+
+Nessun framework, nessun build step: HTML + CSS + JavaScript vanilla in un
+unico file `index.html`, pensato per essere ospitato gratuitamente su
+qualsiasi hosting statico (Netlify, Vercel, GitHub Pages, ecc.).
+
+```
+index.html          → app completa (markup, stile, logica)
+manifest.json        → metadati PWA (nome, icona, colori)
+service-worker.js    → cache della shell per caricamento rapido
+icons/                → icone dell'app
+```
+
+### Fonti dati
+
+| Dato | Fonte |
+|---|---|
+| Rischio token, liquidità, holder | [RugCheck.xyz API](https://api.rugcheck.xyz) (gratuita, no key) |
+| Storico transazioni wallet | RPC pubblico Solana (`api.mainnet-beta.solana.com`) |
+| Giudizio in linguaggio naturale | [Anthropic API](https://console.anthropic.com) (richiede chiave personale) |
+
+## Configurazione della chiave API (opzionale)
+
+Il giudizio AI è una funzione opzionale. **La chiave API non va mai
+inserita nel codice sorgente.** Viene chiesta dall'interfaccia al primo
+utilizzo e salvata solo in `localStorage`, nel browser della persona che
+la usa — non finisce mai nel repository né viene condivisa con altri
+utenti dell'app.
+
+## Limiti noti
+
+- L'RPC pubblico di Solana ha rate limit: la scansione dei top holder può
+  risultare "non verificata" in caso di traffico elevato
+- Il rilevamento "ha venduto" è un segnale indiretto (movimento sul
+  token negli ultimi 30 giorni), non una prova definitiva di rug pull
+- Nessuno strumento automatico sostituisce una due diligence completa:
+  usalo come supporto, non come unica fonte di verità
+
+## Contribuire
+
+Pull request benvenute. Idee aperte:
+- Supporto multi-chain (Ethereum, BSC) tramite GoPlus Security API
+- Cache locale dei risultati per ridurre le chiamate ripetute
+- Soglia holder configurabile dall'interfaccia invece che nel codice
+
+## Licenza
+
+[MIT](./LICENSE) — usalo, modificalo, ridistribuiscilo liberamente.
+
+## Disclaimer
+
+Questo strumento fornisce un'analisi automatica basata su dati pubblici
+on-chain. **Non è consulenza finanziaria.** Anche un punteggio di rischio
+basso non garantisce l'assenza di rischio. Verifica sempre più fonti
+prima di investire.
+
+// Service worker minimale: mette in cache la shell dell'app per un
+// caricamento istantaneo. Le chiamate all'API RugCheck NON vengono mai
+// messe in cache, perché i dati di rischio devono sempre essere aggiornati.
+const CACHE_NAME = "scanner-meme-shell-v1";
+const SHELL_FILES = [
+  "./",
+  "./index.html",
+  "./manifest.json",
+];
+
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    )
+  );
+  self.clients.claim();
+});
+
+self.addEventListener("fetch", (event) => {
+  const url = new URL(event.request.url);
+
+  // Never cache API / proxy calls — always go to the network for live data.
+  if (
+    url.hostname.includes("rugcheck.xyz") ||
+    url.hostname.includes("corsproxy.io") ||
+    url.hostname.includes("allorigins.win")
+  ) {
+    return; // let the browser handle it normally
+  }
+
+  // App shell: cache-first for speed, falling back to network.
+  event.respondWith(
+    caches.match(event.request).then((cached) => cached || fetch(event.request))
+  );
+});
+
+# File di sistema
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Eventuali file locali di configurazione con segreti
+.env
+.env.local
+*.local
+
+# Non committare mai chiavi API o credenziali
+**/secrets.json
+**/*apikey*
+**/*api_key*
+
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Scanner Meme Solana</title>
+<meta name="description" content="Controlla se un memecoin Solana è a rischio scam: liquidità, autorità del contratto e concentrazione dei possessori." />
+
+<!-- PWA -->
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#0B0D10" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Scanner Meme" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+:root {
+  --bg: #0B0D10;
+  --bg-raised: #14171B;
+  --border: #23272D;
+  --text: #F2EFE9;
+  --text-dim: #8B919A;
+  --accent: #3ECF8E;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; padding: 0; }
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background:
+    radial-gradient(ellipse 900px 500px at 50% -10%, rgba(62,207,142,0.08), transparent),
+    var(--bg);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  padding: max(32px, env(safe-area-inset-top)) 20px calc(40px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+svg { display: block; }
+
+.hero { max-width: 640px; width: 100%; text-align: center; margin-bottom: 36px; }
+.hero-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 20px;
+}
+.eyebrow-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  animation: pulse 2s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.hero-title {
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
+  font-size: 34px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0 0 16px;
+}
+.hero-title em { color: var(--accent); font-style: italic; }
+
+.hero-sub {
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.55;
+  max-width: 480px;
+  margin: 0 auto 28px;
+}
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px 6px 6px 14px;
+  transition: border-color .2s;
+}
+.search-bar:focus-within { border-color: var(--accent); }
+.search-icon { color: var(--text-dim); flex-shrink: 0; }
+.search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 16px; /* 16px avoids iOS auto-zoom on focus */
+  padding: 11px 0;
+  min-width: 0;
+}
+.search-input::placeholder { color: #565C64; }
+.search-btn {
+  background: var(--accent);
+  color: #0B0D10;
+  border: none;
+  border-radius: 8px;
+  padding: 11px 18px;
+  font-weight: 600;
+  font-size: 13.5px;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: opacity .15s, transform .15s;
+  flex-shrink: 0;
+}
+.search-btn:active { transform: scale(0.97); }
+.search-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.clear-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 6px 8px;
+  flex-shrink: 0;
+  display: none;
+  border-radius: 6px;
+  line-height: 1;
+}
+.clear-btn:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.clear-btn.show { display: block; }
+.spin { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.history-row {
+  margin-top: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+}
+.history-label { font-size: 12px; color: #565C64; margin-right: 2px; }
+.history-chip {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  padding: 5px 10px;
+  border-radius: 100px;
+  cursor: pointer;
+}
+
+.results { width: 100%; max-width: 640px; }
+
+.error-card {
+  background: #1F0E0F;
+  border: 1px solid #4A2226;
+  border-radius: 12px;
+  padding: 16px 18px;
+  display: flex;
+  gap: 12px;
+  color: #F2A8AB;
+}
+.error-title { font-weight: 600; font-size: 14px; margin-bottom: 3px; color: #F7C5C7; }
+.error-body { font-size: 13.5px; line-height: 1.5; color: #E5A6A9; }
+
+.loading-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 48px 0;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+.report-grid { display: flex; flex-direction: column; gap: 16px; }
+
+.verdict-card {
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  padding: 28px 24px 22px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: box-shadow .4s ease;
+}
+
+.needle-wrap { width: 180px; margin-bottom: 4px; }
+.needle-svg { width: 100%; height: auto; }
+
+.verdict-label {
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
+  font-size: 21px;
+  margin-top: 10px;
+  letter-spacing: -0.01em;
+}
+.verdict-sub { color: var(--text-dim); font-size: 13px; margin-top: 5px; }
+.verdict-score {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  margin-top: 14px;
+  color: var(--text-dim);
+}
+.verdict-score .num { font-size: 17px; font-weight: 600; }
+.verdict-score .max { opacity: 0.6; }
+
+.token-id-row {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.token-id-name { font-size: 14px; font-weight: 600; text-align: left; }
+.token-symbol { color: var(--text-dim); font-weight: 500; }
+.copy-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 11.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.mono { font-family: 'JetBrains Mono', monospace; }
+
+.stats-card, .risks-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 20px 18px;
+}
+
+.card-heading {
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  margin: 0 0 14px;
+  font-weight: 600;
+}
+.risk-count { color: #E5484D; }
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 18px;
+}
+.stat-tile { display: flex; align-items: flex-start; gap: 9px; }
+.stat-icon { margin-top: 2px; color: var(--text-dim); flex-shrink: 0; }
+.stat-label { font-size: 11.5px; color: var(--text-dim); margin-bottom: 2px; }
+.stat-value { font-size: 14px; font-weight: 600; }
+
+.risks-list { display: flex; flex-direction: column; gap: 12px; }
+.risk-row { display: flex; align-items: flex-start; gap: 10px; }
+.risk-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex-shrink: 0; }
+.risk-text { flex: 1; min-width: 0; }
+.risk-name { font-size: 13.5px; font-weight: 600; }
+.risk-desc { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
+.risk-score { font-family: 'JetBrains Mono', monospace; font-size: 12px; flex-shrink: 0; }
+
+.no-risks { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-dim); }
+
+.disclaimer {
+  font-size: 11.5px;
+  color: #565C64;
+  line-height: 1.5;
+  text-align: center;
+  padding: 0 12px;
+  margin-top: 4px;
+}
+
+.empty-state { padding: 24px 0 8px; }
+.empty-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.empty-num { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px; }
+.empty-title { font-family: 'Fraunces', serif; font-weight: 600; font-size: 15px; margin-bottom: 6px; }
+.empty-text { font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
+
+.footer { margin-top: 48px; font-size: 11.5px; color: #444A52; font-family: 'JetBrains Mono', monospace; text-align: center; }
+.manage-key-link {
+  background: none;
+  border: none;
+  color: #444A52;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+  margin-top: 8px;
+  padding: 4px;
+}
+.manage-key-link:hover { color: var(--text-dim); }
+
+.install-banner {
+  display: none;
+  max-width: 640px;
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 20px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 13px;
+}
+.install-banner.show { display: flex; }
+.install-btn {
+  background: var(--accent);
+  color: #0B0D10;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* Holder analysis section */
+.holders-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 20px 18px;
+}
+.holders-subhead {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin: -8px 0 14px;
+  line-height: 1.45;
+}
+.holders-list { display: flex; flex-direction: column; gap: 0; }
+.holder-row {
+  display: grid;
+  grid-template-columns: 22px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.holder-row:last-child { border-bottom: none; }
+.holder-rank { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #565C64; }
+.holder-addr { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--text-dim); }
+.holder-pct {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+}
+.holder-pct.over-limit { color: #E5484D; }
+.holder-pct.under-limit { color: #3ECF8E; }
+.holder-status {
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 3px 7px;
+  border-radius: 5px;
+  white-space: nowrap;
+  min-width: 70px;
+  text-align: center;
+}
+.holder-status.clean { background: rgba(62,207,142,0.12); color: #3ECF8E; }
+.holder-status.sold { background: rgba(229,72,77,0.12); color: #E5484D; }
+.holder-status.pending { background: rgba(139,145,154,0.12); color: var(--text-dim); }
+.holder-status.unknown { background: rgba(139,145,154,0.08); color: #565C64; }
+
+.holders-summary {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rug-warning {
+  background: rgba(229,72,77,0.10);
+  border: 1px solid rgba(229,72,77,0.35);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #F2A8AB;
+  margin-bottom: 16px;
+}
+.rug-warning strong { color: #F7C5C7; }
+.holders-summary-item { flex: 1; }
+.holders-summary-num { font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; }
+.holders-summary-label { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+
+.scan-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  padding: 6px 0;
+}
+.progress-bar-track {
+  flex: 1;
+  height: 5px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 100px;
+  overflow: hidden;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 100px;
+  transition: width 0.3s ease;
+}
+.holders-toggle {
+  width: 100%;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.holders-toggle-sub { font-size: 11.5px; color: var(--text-dim); font-weight: 400; margin-top: 2px; }
+
+/* Chart panel */
+.chart-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px 16px 8px;
+  overflow: hidden;
+}
+.chart-frame-wrap {
+  position: relative;
+  width: 100%;
+  height: 420px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #0B0D10;
+}
+.chart-frame-wrap iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+.chart-unavailable {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 420px;
+  color: var(--text-dim);
+  font-size: 13px;
+  text-align: center;
+  padding: 0 20px;
+}
+
+/* AI verdict panel */
+.ai-card {
+  background: linear-gradient(180deg, rgba(62,207,142,0.06), transparent), var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 20px 20px 18px;
+}
+.ai-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.ai-sparkle { flex-shrink: 0; }
+.ai-text {
+  font-family: 'Fraunces', serif;
+  font-size: 15.5px;
+  line-height: 1.55;
+  color: var(--text);
+}
+.ai-text p { margin: 0 0 10px; }
+.ai-text p:last-child { margin-bottom: 0; }
+.ai-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 13px;
+  padding: 4px 0;
+}
+.ai-dots span {
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-right: 3px;
+  animation: aidot 1.2s infinite ease-in-out;
+}
+.ai-dots span:nth-child(2) { animation-delay: 0.15s; }
+.ai-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes aidot { 0%,80%,100% { opacity: 0.25; } 40% { opacity: 1; } }
+.ai-unavailable { color: var(--text-dim); font-size: 13px; }
+.api-key-form { display: flex; gap: 8px; }
+.api-key-input {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  outline: none;
+  min-width: 0;
+}
+.api-key-input:focus { border-color: var(--accent); }
+.api-key-btn {
+  background: var(--accent);
+  color: #0B0D10;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 14px;
+  font-weight: 600;
+  font-size: 12.5px;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 540px) {
+  .hero-title { font-size: 28px; }
+  .empty-grid { grid-template-columns: 1fr; gap: 22px; }
+  .stats-grid { grid-template-columns: 1fr; }
+  .search-bar { flex-wrap: wrap; }
+  .search-btn { width: 100%; justify-content: center; padding: 12px; }
+}
+</style>
+</head>
+<body>
+
+<div id="installBanner" class="install-banner">
+  <span>Installa l'app sulla schermata Home per un accesso più rapido</span>
+  <button id="installBtn" class="install-btn">Installa</button>
+</div>
+
+<header class="hero">
+  <div class="hero-eyebrow"><span class="eyebrow-dot"></span> SCANNER SOLANA · DATI RUGCHECK.XYZ IN TEMPO REALE</div>
+  <h1 class="hero-title">Prima di comprare,<br />fai parlare la <em>blockchain</em>.</h1>
+  <p class="hero-sub">Incolla l'indirizzo di un memecoin Solana. Leggiamo liquidità, distribuzione dei possessori e permessi del contratto — gli stessi segnali che usano i rug pull per fregare chi compra.</p>
+
+  <div class="search-bar">
+    <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="addrInput" class="search-input" placeholder="Incolla il mint address del token (es. 9n4n...pump)" spellcheck="false" autocapitalize="off" autocomplete="off" />
+    <button id="clearBtn" class="clear-btn" title="Cancella" aria-label="Cancella">✕</button>
+    <button id="checkBtn" class="search-btn">Analizza</button>
+  </div>
+
+  <div id="historyRow" class="history-row"></div>
+</header>
+
+<main class="results" id="results"></main>
+
+<footer class="footer">
+  Dati forniti da RugCheck.xyz · Solo per token sulla blockchain Solana<br />
+  <button id="manageKeyBtn" class="manage-key-link">Gestisci chiave API</button>
+</footer>
+
+<script>
+const RUGCHECK_BASE = "https://api.rugcheck.xyz/v1/tokens";
+// Public Solana RPC for on-chain transaction history checks. Free, no key needed,
+// but rate-limited — that's why we cap the wallet scan to the top 10 holders.
+const SOLANA_RPC = "https://api.mainnet-beta.solana.com";
+const HOLDER_LIMIT_PCT = 20; // soglia richiesta: nessun top holder oltre il 20% (segnale di rug pull)
+const HOLDERS_TO_SCAN = 20; // top N holder analizzati per lo storico vendite
+const SELL_WINDOW_DAYS = 30; // finestra "puliti da almeno 1 mese"
+const CORS_PROXIES = [
+  (url) => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+  (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+];
+
+const ICONS = {
+  shieldCheck: `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z"/><path d="m9 12 2 2 4-4"/></svg>`,
+  shieldAlert: `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z"/><line x1="12" y1="8" x2="12" y2="13"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+  shieldQuestion: `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-8 9-4.5-1.5-8-4-8-9V5l8-3 8 3z"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`,
+  lock: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`,
+  unlock: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>`,
+  snowflake: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/><path d="m20 16-4-4 4-4M4 8l4 4-4 4M16 4l-4 4-4-4M8 20l4-4 4 4"/></svg>`,
+  droplets: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 16.3c2.2 0 4-1.83 4-4.05 0-1.16-.57-2.26-1.71-3.19S7.29 6.75 7 5.3c-.29 1.45-1.14 2.84-2.29 3.76S3 11.1 3 12.25c0 2.22 1.8 4.05 4 4.05z"/><path d="M12.56 6.6A10.97 10.97 0 0 0 14 3.02c.5 2.5 2 4.9 4 6.5s3 3.5 3 5.5a6.98 6.98 0 0 1-11.91 4.97"/></svg>`,
+  users: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+  flame: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>`,
+  copy: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`,
+  check: `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`,
+};
+
+function shortAddr(a) { return a ? a.slice(0,4) + "…" + a.slice(-4) : ""; }
+function fmtPct(n) { return (n === null || n === undefined || isNaN(n)) ? "—" : `${(n * (n <= 1 ? 100 : 1)).toFixed(1)}%`; }
+function fmtUsd(n) {
+  if (n === null || n === undefined || isNaN(n)) return "—";
+  if (n >= 1e6) return `$${(n/1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n/1e3).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+}
+function verdictFromScore(score) {
+  if (score <= 30) return { tier: "low", label: "RISCHIO BASSO", sub: "Nessun campanello d'allarme rilevante", ring: "#3ECF8E", glow: "rgba(62,207,142,0.35)", bg: "#0E1B16", icon: "shieldCheck" };
+  if (score <= 55) return { tier: "mid", label: "RISCHIO MODERATO", sub: "Alcuni segnali da verificare", ring: "#E8B339", glow: "rgba(232,179,57,0.30)", bg: "#1C1608", icon: "shieldQuestion" };
+  return { tier: "high", label: "RISCHIO ALTO — probabile scam", sub: "Più indicatori critici rilevati", ring: "#E5484D", glow: "rgba(229,72,77,0.35)", bg: "#1F0E0F", icon: "shieldAlert" };
+}
+
+let history = JSON.parse(localStorage.getItem("scanHistory") || "[]");
+
+function renderHistory() {
+  const row = document.getElementById("historyRow");
+  if (!history.length) { row.innerHTML = ""; return; }
+  row.innerHTML = `<span class="history-label">Recenti:</span>` +
+    history.map(a => `<button class="history-chip" data-addr="${a}">${shortAddr(a)}</button>`).join("");
+  row.querySelectorAll(".history-chip").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.getElementById("addrInput").value = btn.dataset.addr;
+      runCheck(btn.dataset.addr);
+    });
+  });
+}
+renderHistory();
+
+function emptyState() {
+  return `<div class="empty-state"><div class="empty-grid">
+    <div class="empty-col"><div class="empty-num">01</div><div class="empty-title">Autorità del contratto</div><div class="empty-text">Se chi ha creato il token può ancora coniare nuove monete o congelare il tuo wallet, è una bandiera rossa.</div></div>
+    <div class="empty-col"><div class="empty-num">02</div><div class="empty-title">Liquidità bloccata</div><div class="empty-text">Se la liquidità non è bloccata, chi l'ha fornita può ritirarla in qualsiasi momento e far crollare il prezzo a zero.</div></div>
+    <div class="empty-col"><div class="empty-num">03</div><div class="empty-title">Concentrazione possessori</div><div class="empty-text">Pochi wallet che controllano gran parte della supply possono vendere in massa e svuotare il valore del token.</div></div>
+  </div></div>`;
+}
+document.getElementById("results").innerHTML = emptyState();
+
+async function fetchReport(addr) {
+  const targetUrl = `${RUGCHECK_BASE}/${addr}/report`;
+  let lastErr = null;
+  try {
+    const res = await fetch(targetUrl, { headers: { Accept: "application/json" } });
+    if (res.status === 404) throw { code: 404 };
+    if (res.ok) return await res.json();
+    lastErr = { code: res.status };
+  } catch (e) { if (e && e.code === 404) throw e; lastErr = e; }
+
+  for (const build of CORS_PROXIES) {
+    try {
+      const res = await fetch(build(targetUrl), { headers: { Accept: "application/json" } });
+      if (res.status === 404) throw { code: 404 };
+      if (!res.ok) { lastErr = { code: res.status }; continue; }
+      const data = await res.json();
+      if (data && data.contents) return JSON.parse(data.contents);
+      return data;
+    } catch (e) { if (e && e.code === 404) throw e; lastErr = e; }
+  }
+  throw lastErr || new Error("unknown");
+}
+
+function normaliseReport(data, addr) {
+  const score = typeof data.score_normalised === "number" ? data.score_normalised : Math.min(100, Math.round((data.score || 0) / 10));
+  const risks = Array.isArray(data.risks) ? data.risks : [];
+  const topHolders = Array.isArray(data.topHolders) ? data.topHolders : [];
+  const topHolderPct = topHolders.length ? topHolders.filter(h => !h.insider && h.pct !== undefined).slice(0,1).reduce((a,h) => a + (h.pct||0), 0) : null;
+  const markets = Array.isArray(data.markets) ? data.markets : [];
+  const totalLiquidity = data.totalMarketLiquidity ?? markets.reduce((a,m) => a + (m.liquidity?.usd || m.lp?.lpLockedUSD || 0), 0);
+  const lpLockedPct = markets.length ? markets.reduce((a,m) => a + (m.lp?.lpLockedPct ?? 0), 0) / markets.length : (data.lpLockedPct ?? null);
+
+  // Lista dettagliata dei top holder (per il pannello di analisi 3% + storico vendite)
+  const holderList = topHolders
+    .filter(h => h.address || h.owner)
+    .slice(0, HOLDERS_TO_SCAN)
+    .map(h => ({
+      address: h.address || h.owner,
+      pct: typeof h.pct === "number" ? h.pct : 0,
+      insider: !!h.insider,
+    }));
+
+  // Pair con più liquidità: lo useremo per incorporare il grafico DexScreener
+  const bestMarket = markets.length
+    ? markets.reduce((best, m) => {
+        const liq = m.liquidity?.usd || m.lp?.lpLockedUSD || 0;
+        const bestLiq = best ? (best.liquidity?.usd || best.lp?.lpLockedUSD || 0) : -1;
+        return liq > bestLiq ? m : best;
+      }, null)
+    : null;
+  const pairAddress = bestMarket?.pubkey || bestMarket?.market?.pubkey || bestMarket?.id || null;
+
+  return {
+    addr,
+    name: data.tokenMeta?.name || data.token?.name || "Token sconosciuto",
+    symbol: data.tokenMeta?.symbol || data.token?.symbol || "",
+    score, risks,
+    mintAuthority: data.mintAuthority ?? data.token?.mintAuthority ?? null,
+    freezeAuthority: data.freezeAuthority ?? data.token?.freezeAuthority ?? null,
+    holdersCount: data.totalHolders ?? topHolders.length ?? null,
+    topHolderPct, totalLiquidity, lpLockedPct,
+    holderList, pairAddress,
+  };
+}
+
+function statTile(icon, label, value, tone) {
+  return `<div class="stat-tile"><span class="stat-icon" style="${tone ? `color:${tone}` : ""}">${ICONS[icon]}</span>
+    <div><div class="stat-label">${label}</div><div class="stat-value">${value}</div></div></div>`;
+}
+
+function riskRow(r) {
+  const color = { danger: "#E5484D", warn: "#E8B339", info: "#7C8B9A" }[r.level] || "#7C8B9A";
+  return `<div class="risk-row"><span class="risk-dot" style="background:${color}"></span>
+    <div class="risk-text"><div class="risk-name">${r.name || ""}</div>${r.description ? `<div class="risk-desc">${r.description}</div>` : ""}</div>
+    ${(r.score !== undefined && r.score !== null) ? `<span class="risk-score" style="color:${color}">+${r.score}</span>` : ""}</div>`;
+}
+
+// --- Analisi on-chain dei top holder (livello 2: storico vendite) ---
+
+async function rpcCall(method, params) {
+  const res = await fetch(SOLANA_RPC, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  if (!res.ok) throw new Error(`RPC error ${res.status}`);
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message || "RPC error");
+  return json.result;
+}
+
+// Per un dato wallet, controlla se ha firmato transazioni negli ultimi N giorni
+// che includono il mint del token (segnale indiretto di vendita/movimento).
+// Usa il pattern standard getSignaturesForAddress, gratuito su qualsiasi RPC.
+async function checkWalletActivity(walletAddress, tokenMint, windowDays) {
+  try {
+    const sigs = await rpcCall("getSignaturesForAddress", [walletAddress, { limit: 25 }]);
+    if (!Array.isArray(sigs) || sigs.length === 0) {
+      return { status: "clean", reason: "Nessuna transazione recente trovata" };
+    }
+
+    const cutoff = Date.now() / 1000 - windowDays * 24 * 60 * 60;
+    const recentSigs = sigs.filter(s => (s.blockTime ?? 0) >= cutoff && !s.err);
+
+    if (recentSigs.length === 0) {
+      return { status: "clean", reason: `Nessun movimento negli ultimi ${windowDays} giorni` };
+    }
+
+    // Guarda al massimo le prime 5 transazioni recenti per restare nei limiti di rate
+    // dell'RPC pubblico, e verifica se coinvolgono il mint del token.
+    let touchedToken = false;
+    for (const s of recentSigs.slice(0, 5)) {
+      try {
+        const tx = await rpcCall("getTransaction", [s.signature, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]);
+        const accountKeys = tx?.transaction?.message?.accountKeys || [];
+        const preBalances = tx?.meta?.preTokenBalances || [];
+        const postBalances = tx?.meta?.postTokenBalances || [];
+        const mintsInvolved = new Set([...preBalances, ...postBalances].map(b => b.mint));
+        const keysMatch = accountKeys.some(k => (k.pubkey || k) === tokenMint);
+        if (mintsInvolved.has(tokenMint) || keysMatch) { touchedToken = true; break; }
+      } catch (_) { /* singola tx fallita, continua con le altre */ }
+      await new Promise(r => setTimeout(r, 150)); // rispetta i rate limit dell'RPC pubblico
+    }
+
+    return touchedToken
+      ? { status: "sold", reason: `Movimento sul token negli ultimi ${windowDays} giorni` }
+      : { status: "clean", reason: `Attivo ma nessun movimento su questo token in ${windowDays} giorni` };
+  } catch (e) {
+    return { status: "unknown", reason: "Impossibile verificare (RPC non raggiungibile)" };
+  }
+}
+
+async function scanTopHolders(report, onProgress) {
+  const results = [];
+  const list = report.holderList || [];
+  for (let i = 0; i < list.length; i++) {
+    const h = list[i];
+    onProgress(i, list.length);
+    const activity = await checkWalletActivity(h.address, report.addr, SELL_WINDOW_DAYS);
+    results.push({ ...h, ...activity });
+    await new Promise(r => setTimeout(r, 200)); // pausa tra wallet per non saturare l'RPC pubblico
+  }
+  onProgress(list.length, list.length);
+  return results;
+}
+
+// --- Giudizio AI finale ---
+// ATTENZIONE: questa app, una volta pubblicata su Netlify/Vercel, è un sito
+// statico puro — non ha accesso automatico all'API di Claude come accadeva
+// nell'anteprima dentro Claude.ai. Per far funzionare il giudizio AI qui
+// serve una vera chiave API Anthropic, inserita qui sotto (vedi LEGGIMI.md
+// per come ottenerla e perché va protetta). Senza chiave, il pannello AI
+// mostrerà semplicemente "non disponibile" e il resto dell'app continuerà
+// a funzionare normalmente.
+// La chiave API NON va mai scritta qui nel codice (specialmente se il
+// progetto è pubblico/open source su GitHub: chiunque la vedrebbe).
+// Viene invece chiesta una sola volta alla persona che usa l'app e salvata
+// solo nel suo browser (localStorage), mai condivisa né caricata da nessuna
+// parte insieme al codice.
+function getApiKey() {
+  return localStorage.getItem("anthropicApiKey") || "";
+}
+function setApiKey(key) {
+  localStorage.setItem("anthropicApiKey", key.trim());
+}
+function clearApiKey() {
+  localStorage.removeItem("anthropicApiKey");
+}
+
+function buildAiPrompt(report) {
+  const riskLines = report.risks.length
+    ? report.risks.map(r => `- ${r.name}${r.description ? ": " + r.description : ""} (livello: ${r.level || "n/d"})`).join("\n")
+    : "Nessun rischio specifico segnalato dall'analisi automatica.";
+
+  return `Sei un analista esperto di sicurezza dei memecoin su Solana. Analizza questi dati oggettivi raccolti da RugCheck.xyz su un token e scrivi un giudizio finale chiaro per una persona normale che non capisce termini tecnici DeFi.
+
+DATI DEL TOKEN:
+- Nome: ${report.name} (${report.symbol || "simbolo sconosciuto"})
+- Indirizzo: ${report.addr}
+- Punteggio di rischio automatico: ${report.score}/100 (più alto = più rischioso)
+- Autorità di conio (mint) ancora attiva: ${report.mintAuthority ? "SÌ — il creatore può ancora stampare nuovi token" : "NO — revocata"}
+- Autorità di blocco wallet (freeze) ancora attiva: ${report.freezeAuthority ? "SÌ — il creatore può bloccare i wallet altrui" : "NO — revocata"}
+- Liquidità totale: ${report.totalLiquidity ? "$" + Math.round(report.totalLiquidity).toLocaleString("it-IT") : "non disponibile"}
+- Percentuale di liquidità bloccata: ${report.lpLockedPct !== null ? (report.lpLockedPct * (report.lpLockedPct <= 1 ? 100 : 1)).toFixed(1) + "%" : "non disponibile"}
+- Numero totale di possessori: ${report.holdersCount ?? "non disponibile"}
+- Il wallet più grande detiene: ${report.topHolderPct !== null ? (report.topHolderPct * (report.topHolderPct <= 1 ? 100 : 1)).toFixed(1) + "%" : "non disponibile"}
+
+RISCHI RILEVATI DALL'ANALISI AUTOMATICA:
+${riskLines}
+
+${report.holderScan ? `ANALISI DEI TOP ${report.holderScan.length} HOLDER (soglia ${HOLDER_LIMIT_PCT}% a wallet, storico vendite ${SELL_WINDOW_DAYS} giorni):
+${report.holderScan.map((h,i) => `- Holder #${i+1}: detiene ${h.pct.toFixed(2)}% (${h.pct > HOLDER_LIMIT_PCT ? "OLTRE la soglia del " + HOLDER_LIMIT_PCT + "% — possibile pericolo rug pull" : "entro la soglia"}) — stato: ${h.status === "sold" ? "ha movimentato il token di recente" : h.status === "clean" ? "nessun movimento sospetto" : "non verificabile"}`).join("\n")}` : "Analisi dettagliata dei top holder non ancora eseguita dall'utente."}
+
+Scrivi un giudizio in 2-3 paragrafi brevi, in italiano semplice e diretto, senza usare elenchi puntati. Spiega cosa significano questi dati in pratica per chi vuole comprare il token, quali sono i 1-2 segnali più importanti da tenere a mente, e chiudi con un consiglio pratico equilibrato (non dare consigli finanziari assoluti tipo "compra" o "non comprare", ma aiuta la persona a capire il livello di cautela necessario).`;
+}
+
+async function fetchAiVerdict(report) {
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    throw new Error("NO_API_KEY");
+  }
+  const prompt = buildAiPrompt(report);
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-6",
+      max_tokens: 500,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (response.status === 401) throw new Error("INVALID_KEY");
+  if (!response.ok) throw new Error(`AI error ${response.status}`);
+  const data = await response.json();
+  const textBlock = (data.content || []).find(c => c.type === "text");
+  if (!textBlock || !textBlock.text) throw new Error("Risposta AI vuota");
+  return textBlock.text;
+}
+
+function aiLoadingHtml() {
+  return `
+    <div class="ai-card">
+      <h3 class="ai-heading">${ICONS.flame.replace('width="15" height="15"', 'width="14" height="14"')} Giudizio AI</h3>
+      <div class="ai-loading">
+        <span class="ai-dots"><span></span><span></span><span></span></span>
+        Sto leggendo i dati e preparando una spiegazione…
+      </div>
+    </div>`;
+}
+
+function aiResultHtml(text) {
+  const paragraphs = text.split(/\n\s*\n/).map(p => `<p>${p.trim()}</p>`).join("");
+  return `
+    <div class="ai-card">
+      <h3 class="ai-heading">✨ Giudizio AI</h3>
+      <div class="ai-text">${paragraphs}</div>
+    </div>`;
+}
+
+function aiUnavailableHtml(reason) {
+  if (reason === "NO_API_KEY") {
+    return `
+      <div class="ai-card">
+        <h3 class="ai-heading">✨ Giudizio AI</h3>
+        <p class="ai-unavailable" style="margin-bottom:10px">Per attivare il giudizio AI serve la tua chiave API personale di Anthropic (gratuita da creare su console.anthropic.com). Viene salvata solo su questo dispositivo, mai condivisa.</p>
+        <div class="api-key-form">
+          <input id="apiKeyInput" type="password" class="api-key-input" placeholder="sk-ant-..." autocomplete="off" />
+          <button id="apiKeySaveBtn" class="api-key-btn">Salva e analizza</button>
+        </div>
+      </div>`;
+  }
+  const msg = reason === "INVALID_KEY"
+    ? "La chiave API salvata non è valida o è scaduta. Inseriscine una nuova qui sotto."
+    : "Il giudizio AI non è disponibile in questo momento (servizio irraggiungibile). I dati tecnici sopra restano comunque validi e aggiornati in tempo reale.";
+  const showForm = reason === "INVALID_KEY";
+  return `
+    <div class="ai-card">
+      <h3 class="ai-heading">✨ Giudizio AI</h3>
+      <p class="ai-unavailable" style="margin-bottom:${showForm ? '10px' : '0'}">${msg}</p>
+      ${showForm ? `
+        <div class="api-key-form">
+          <input id="apiKeyInput" type="password" class="api-key-input" placeholder="sk-ant-..." autocomplete="off" />
+          <button id="apiKeySaveBtn" class="api-key-btn">Salva e analizza</button>
+        </div>` : ""}
+    </div>`;
+}
+
+async function loadAiVerdict(report) {
+  const container = document.getElementById("aiPanel");
+  if (!container) return;
+  container.innerHTML = aiLoadingHtml();
+  try {
+    const text = await fetchAiVerdict(report);
+    container.innerHTML = aiResultHtml(text);
+  } catch (e) {
+    const reason = e && e.message;
+    container.innerHTML = aiUnavailableHtml(reason);
+    const saveBtn = document.getElementById("apiKeySaveBtn");
+    if (saveBtn) {
+      saveBtn.addEventListener("click", () => {
+        const val = document.getElementById("apiKeyInput").value;
+        if (!val.trim()) return;
+        setApiKey(val);
+        loadAiVerdict(report);
+      });
+    }
+  }
+}
+
+
+
+function chartCardHtml(report) {
+  if (!report.pairAddress) {
+    return `
+      <div class="chart-card">
+        <h3 class="card-heading">Grafico prezzo</h3>
+        <div class="chart-unavailable">Nessun pool di liquidità trovato per questo token: grafico non disponibile.</div>
+      </div>`;
+  }
+  const src = `https://dexscreener.com/solana/${report.pairAddress}?embed=1&theme=dark&trades=0&info=0`;
+  return `
+    <div class="chart-card">
+      <h3 class="card-heading">Grafico prezzo</h3>
+      <div class="chart-frame-wrap">
+        <iframe src="${src}" loading="lazy" title="Grafico prezzo ${report.name}" allow="clipboard-write"></iframe>
+      </div>
+    </div>`;
+}
+
+function shortWallet(a) { return a ? a.slice(0,4) + "…" + a.slice(-4) : "—"; }
+
+function holdersToggleHtml(count) {
+  return `
+    <button class="holders-toggle" id="holdersToggleBtn">
+      <span>
+        🔍 Analizza top ${count} holder
+        <div class="holders-toggle-sub">Allerta rug pull oltre il ${HOLDER_LIMIT_PCT}% a wallet · storico vendite ${SELL_WINDOW_DAYS} giorni</div>
+      </span>
+      <span>→</span>
+    </button>`;
+}
+
+function holdersProgressHtml(done, total) {
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  return `
+    <div class="holders-card">
+      <h3 class="card-heading">Analisi top holder in corso</h3>
+      <div class="scan-progress">
+        <span>${done}/${total} wallet</span>
+        <div class="progress-bar-track"><div class="progress-bar-fill" style="width:${pct}%"></div></div>
+        <span>${pct}%</span>
+      </div>
+    </div>`;
+}
+
+function holdersResultHtml(results) {
+  const overLimit = results.filter(h => h.pct > HOLDER_LIMIT_PCT).length;
+  const sold = results.filter(h => h.status === "sold").length;
+  const clean = results.filter(h => h.status === "clean").length;
+
+  const rugWarning = overLimit > 0 ? `
+    <div class="rug-warning">
+      ⚠️ <strong>Pericolo rug pull:</strong> ${overLimit} wallet ${overLimit === 1 ? "detiene" : "detengono"} da ${overLimit === 1 ? "solo" : ""} ${overLimit === 1 ? "una" : ""} oltre il ${HOLDER_LIMIT_PCT}% della supply. Un wallet così grande può far crollare il prezzo vendendo in un colpo solo.
+    </div>` : "";
+
+  const rows = results.map((h, i) => {
+    const pctClass = h.pct > HOLDER_LIMIT_PCT ? "over-limit" : "under-limit";
+    const statusLabel = { clean: "✓ pulito", sold: "⚠ ha venduto", unknown: "? non verificato" }[h.status] || "—";
+    const statusClass = h.status || "unknown";
+    return `<div class="holder-row" title="${h.reason || ""}">
+      <span class="holder-rank">#${i + 1}</span>
+      <span class="holder-addr">${shortWallet(h.address)}</span>
+      <span class="holder-pct ${pctClass}">${h.pct.toFixed(2)}%</span>
+      <span class="holder-status ${statusClass}">${statusLabel}</span>
+    </div>`;
+  }).join("");
+
+  return `
+    <div class="holders-card">
+      <h3 class="card-heading">Analisi top ${results.length} holder</h3>
+      <p class="holders-subhead">Un singolo wallet oltre il ${HOLDER_LIMIT_PCT}% della supply è un segnale di pericolo rug pull. Storico verificato sugli ultimi ${SELL_WINDOW_DAYS} giorni.</p>
+      ${rugWarning}
+      <div class="holders-summary">
+        <div class="holders-summary-item">
+          <div class="holders-summary-num" style="color:${overLimit > 0 ? '#E5484D' : '#3ECF8E'}">${overLimit}</div>
+          <div class="holders-summary-label">Oltre il ${HOLDER_LIMIT_PCT}% (pericolo)</div>
+        </div>
+        <div class="holders-summary-item">
+          <div class="holders-summary-num" style="color:${sold > 0 ? '#E5484D' : '#3ECF8E'}">${sold}</div>
+          <div class="holders-summary-label">Hanno venduto</div>
+        </div>
+        <div class="holders-summary-item">
+          <div class="holders-summary-num" style="color:#3ECF8E">${clean}</div>
+          <div class="holders-summary-label">Puliti</div>
+        </div>
+      </div>
+      <div class="holders-list">${rows}</div>
+    </div>`;
+}
+
+function attachHoldersToggle(report) {
+  const btn = document.getElementById("holdersToggleBtn");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const container = document.getElementById("holdersPanel");
+    const total = (report.holderList || []).length;
+    if (total === 0) {
+      container.innerHTML = `<div class="holders-card"><p class="holders-subhead" style="margin:0">Nessun dato sui top holder disponibile per questo token.</p></div>`;
+      return;
+    }
+    container.innerHTML = holdersProgressHtml(0, total);
+    const results = await scanTopHolders(report, (d, t) => {
+      container.innerHTML = holdersProgressHtml(d, t);
+    });
+    container.innerHTML = holdersResultHtml(results);
+    report.holderScan = results;
+    loadAiVerdict(report); // rigenera il giudizio AI includendo l'analisi holder appena fatta
+  });
+}
+
+function renderReport(report) {
+  const v = verdictFromScore(report.score);
+  const angle = -90 + (Math.min(100, Math.max(0, report.score)) / 100) * 180;
+
+  document.getElementById("results").innerHTML = `
+    <div class="report-grid">
+      <section class="verdict-card" style="background:${v.bg}; box-shadow: 0 0 60px ${v.glow}">
+        <div class="needle-wrap"><svg class="needle-svg" viewBox="0 0 200 110">
+          <defs><linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#3ECF8E"/><stop offset="50%" stop-color="#E8B339"/><stop offset="100%" stop-color="#E5484D"/>
+          </linearGradient></defs>
+          <path d="M 10 100 A 90 90 0 0 1 190 100" fill="none" stroke="url(#gaugeGrad)" stroke-width="10" stroke-linecap="round" opacity="0.85"/>
+          <g transform="rotate(${angle} 100 100)"><line x1="100" y1="100" x2="100" y2="24" stroke="#F4EFE6" stroke-width="3" stroke-linecap="round"/><circle cx="100" cy="100" r="7" fill="#F4EFE6"/></g>
+        </svg></div>
+        <span style="color:${v.ring}">${ICONS[v.icon]}</span>
+        <div class="verdict-label" style="color:${v.ring}">${v.label}</div>
+        <div class="verdict-sub">${v.sub}</div>
+        <div class="verdict-score"><span class="num" style="color:${v.ring}">${report.score}</span><span class="max">/100</span></div>
+        <div class="token-id-row">
+          <div class="token-id-name">${report.name} ${report.symbol ? `<span class="token-symbol">$${report.symbol}</span>` : ""}</div>
+          <button class="copy-btn" id="copyBtn">${ICONS.copy}<span class="mono">${shortAddr(report.addr)}</span></button>
+        </div>
+      </section>
+
+      ${chartCardHtml(report)}
+
+      <div id="aiPanel"></div>
+
+      <section class="stats-card">
+        <h3 class="card-heading">Segnali chiave</h3>
+        <div class="stats-grid">
+          ${statTile(report.mintAuthority ? "unlock" : "lock", "Autorità di conio", report.mintAuthority ? "Attiva (rischio)" : "Revocata", report.mintAuthority ? "#E5484D" : "#3ECF8E")}
+          ${statTile(report.freezeAuthority ? "snowflake" : "lock", "Autorità di blocco wallet", report.freezeAuthority ? "Attiva (rischio)" : "Revocata", report.freezeAuthority ? "#E5484D" : "#3ECF8E")}
+          ${statTile("droplets", "Liquidità totale", fmtUsd(report.totalLiquidity))}
+          ${statTile((report.lpLockedPct && report.lpLockedPct > 0.7) ? "lock" : "unlock", "Liquidità bloccata", report.lpLockedPct !== null ? fmtPct(report.lpLockedPct) : "Dato non disponibile", report.lpLockedPct !== null ? (report.lpLockedPct > 0.7 ? "#3ECF8E" : "#E8B339") : undefined)}
+          ${statTile("users", "Numero possessori", report.holdersCount ?? "—")}
+          ${statTile("flame", "Top holder detiene", report.topHolderPct !== null ? fmtPct(report.topHolderPct) : "—", report.topHolderPct !== null ? (report.topHolderPct > 0.2 ? "#E5484D" : "#3ECF8E") : undefined)}
+        </div>
+      </section>
+
+      <section class="risks-card">
+        <h3 class="card-heading">Rischi rilevati ${report.risks.length ? `<span class="risk-count">(${report.risks.length})</span>` : ""}</h3>
+        ${report.risks.length === 0
+          ? `<div class="no-risks">${ICONS.shieldCheck.replace('width="26" height="26"','width="16" height="16"').replace('stroke-width="2.2"','stroke-width="2"')} Nessun rischio specifico segnalato dall'analisi automatica.</div>`
+          : `<div class="risks-list">${report.risks.map(riskRow).join("")}</div>`}
+      </section>
+
+      <div id="holdersPanel">${holdersToggleHtml(Math.min(HOLDERS_TO_SCAN, (report.holderList || []).length) || HOLDERS_TO_SCAN)}</div>
+
+      <p class="disclaimer">Analisi automatica generata da dati pubblici on-chain (RugCheck.xyz). Non è una consulenza finanziaria: anche un punteggio basso non garantisce l'assenza di rischio. Verifica sempre più fonti prima di investire.</p>
+    </div>`;
+
+  document.getElementById("copyBtn").addEventListener("click", () => {
+    navigator.clipboard.writeText(report.addr).then(() => {
+      const btn = document.getElementById("copyBtn");
+      btn.innerHTML = `${ICONS.check}<span class="mono">${shortAddr(report.addr)}</span>`;
+      setTimeout(() => { btn.innerHTML = `${ICONS.copy}<span class="mono">${shortAddr(report.addr)}</span>`; }, 1500);
+    });
+  });
+
+  attachHoldersToggle(report);
+  loadAiVerdict(report);
+}
+
+function renderError(msg) {
+  document.getElementById("results").innerHTML = `
+    <div class="error-card">${ICONS.shieldAlert.replace('width="26" height="26"','width="18" height="18"')}
+      <div><div class="error-title">Impossibile completare l'analisi</div><div class="error-body">${msg}</div></div>
+    </div>`;
+}
+
+function renderLoading() {
+  document.getElementById("results").innerHTML = `<div class="loading-card">⏳ Interrogo la blockchain Solana…</div>`;
+}
+
+async function runCheck(addrOverride) {
+  const input = document.getElementById("addrInput");
+  const addr = (addrOverride ?? input.value).trim();
+  if (!addr) return;
+  const btn = document.getElementById("checkBtn");
+  btn.disabled = true;
+  renderLoading();
+
+  try {
+    const data = await fetchReport(addr);
+    if (!data || (Array.isArray(data) && data.length === 0)) {
+      throw new Error("Nessun dato trovato per questo indirizzo. Controlla che sia un mint address Solana valido e che il token sia tracciato da RugCheck.");
+    }
+    const report = normaliseReport(data, addr);
+    renderReport(report);
+    history = [addr, ...history.filter(a => a !== addr)].slice(0, 6);
+    localStorage.setItem("scanHistory", JSON.stringify(history));
+    renderHistory();
+  } catch (e) {
+    if (e && e.code === 404) {
+      renderError("Indirizzo non trovato. Controlla che sia un mint address Solana valido (es. token da pump.fun, Raydium, ecc.) e non l'indirizzo di un wallet o di un altro tipo.");
+    } else if (e && e.code) {
+      renderError(`Il servizio di analisi ha risposto con errore (codice ${e.code}). Può capitare nei momenti di traffico alto: riprova tra qualche secondo.`);
+    } else if (e instanceof Error) {
+      renderError(e.message);
+    } else {
+      renderError("Non riesco a raggiungere il servizio di analisi in questo momento. Riprova tra poco.");
+    }
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("checkBtn").addEventListener("click", () => runCheck());
+document.getElementById("addrInput").addEventListener("keydown", (e) => { if (e.key === "Enter") runCheck(); });
+
+const addrInputEl = document.getElementById("addrInput");
+const clearBtnEl = document.getElementById("clearBtn");
+function syncClearBtn() {
+  clearBtnEl.classList.toggle("show", addrInputEl.value.trim().length > 0);
+}
+addrInputEl.addEventListener("input", syncClearBtn);
+syncClearBtn();
+
+clearBtnEl.addEventListener("click", () => {
+  addrInputEl.value = "";
+  syncClearBtn();
+  addrInputEl.focus();
+  document.getElementById("results").innerHTML = emptyState();
+});
+
+document.getElementById("manageKeyBtn").addEventListener("click", () => {
+  if (getApiKey()) {
+    const confirmClear = confirm("Vuoi rimuovere la chiave API salvata su questo dispositivo? Il giudizio AI smetterà di funzionare finché non ne inserisci una nuova.");
+    if (confirmClear) { clearApiKey(); alert("Chiave rimossa."); }
+  } else {
+    alert("Nessuna chiave API salvata al momento. Comparirà un campo per inserirla la prossima volta che analizzi un token.");
+  }
+});
+
+// --- PWA install prompt ---
+let deferredPrompt;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredPrompt = e;
+  document.getElementById("installBanner").classList.add("show");
+});
+document.getElementById("installBtn").addEventListener("click", async () => {
+  if (!deferredPrompt) return;
+  deferredPrompt.prompt();
+  await deferredPrompt.userChoice;
+  deferredPrompt = null;
+  document.getElementById("installBanner").classList.remove("show");
+});
+window.addEventListener("appinstalled", () => {
+  document.getElementById("installBanner").classList.remove("show");
+});
+
+// --- Service worker registration ---
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  });
+}
+</script>
+</body>
+</html>
+
 # Scanner Meme Solana — Guida alla pubblicazione (PWA)
 
 Questo pacchetto contiene un'app web completa e pronta da pubblicare.
@@ -70,23 +1451,39 @@ come una vera app, a schermo intero, senza barra del browser.
 
 ## Analisi dei top holder (novità)
 
-Dopo aver controllato un token, compare un pulsante "Analizza top 10
+Dopo aver controllato un token, compare un pulsante "Analizza top 20
 holder" che:
 
-1. Controlla che nessuno dei primi 10 possessori detenga più del **3%**
-   della supply
+1. Controlla che nessuno dei primi 20 possessori detenga più del **20%**
+   della supply. Se qualcuno lo supera, compare un avviso ben visibile
+   di **pericolo rug pull** — un wallet così grande può far crollare il
+   prezzo vendendo in un colpo solo
 2. Interroga la blockchain Solana per lo storico delle transazioni di
    ogni wallet negli ultimi **30 giorni**, per capire se hanno già
    venduto il token
 
 **Tempo di attesa:** questa scansione interroga la blockchain in tempo
-reale per ogni wallet, quindi richiede circa **15-25 secondi**. È
-normale: c'è una barra di progresso che mostra l'avanzamento.
+reale per ogni wallet (20 in totale), quindi richiede circa **40-60
+secondi**. È normale: c'è una barra di progresso che mostra
+l'avanzamento.
 
 **Limite onesto:** usa l'RPC pubblico gratuito di Solana, che ha dei
 limiti di velocità. Se in quel momento il servizio è molto trafficato,
 alcuni wallet potrebbero risultare "non verificato" invece di
 "pulito/ha venduto" — in quel caso riprova tra qualche minuto.
+
+## Grafico prezzo (novità)
+
+Ogni token analizzato mostra ora un grafico prezzo incorporato da
+DexScreener, con candele e volume in tempo reale. Se il token non ha
+ancora un pool di liquidità attivo, il grafico non sarà disponibile
+(capita per token appena creati).
+
+## Pulsante Cancella (novità)
+
+Accanto al pulsante "Analizza" compare una ✕ quando scrivi un indirizzo:
+permette di svuotare velocemente il campo e tornare alla schermata
+iniziale.
 
 ## Giudizio AI (novità — richiede un piccolo passo extra)
 
@@ -139,3 +1536,25 @@ Una volta che la PWA funziona, è possibile "incartarla" con uno
 strumento come **Capacitor** per pubblicarla anche sugli store veri.
 Richiede un account sviluppatore Google (~25$ una tantum) o Apple
 (~99$/anno). Fammelo sapere quando vuoi affrontare questo passo.
+
+MIT License
+
+Copyright (c) 2026 Mortaz
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
